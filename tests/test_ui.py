@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from app.services.entry_service import EntryDraft, LinkDraft
 from app.ui.styles.theme import build_stylesheet, palette
+
+
+def _wait_until(qapp, predicate, timeout: float = 5.0) -> bool:
+    """Pump the Qt event loop until ``predicate`` holds or the timeout expires."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        if predicate():
+            return True
+        time.sleep(0.01)
+    qapp.processEvents()
+    return bool(predicate())
 
 
 @pytest.fixture()
@@ -224,3 +238,85 @@ def test_open_url_is_not_automatic(window, monkeypatch) -> None:
     assert calls == []
     window.open_url("https://example.com")
     assert calls == ["https://example.com"]
+
+
+def test_entry_dialog_has_download_icon_button(context, qapp) -> None:
+    from app.ui.dialogs.entry_dialog import EntryDialog
+
+    dialog = EntryDialog(theme="dark", context=context)
+    assert dialog.download_button.text().startswith("Скачать")
+    assert dialog.download_button.isEnabled()
+    dialog.close()
+
+
+def test_entry_dialog_guesses_site_url(context, qapp) -> None:
+    from app.ui.dialogs.entry_dialog import EntryDialog
+    from app.services.entry_service import EntryDraft, LinkDraft
+
+    entry = context.entries.create_entry(
+        EntryDraft(
+            title="Site",
+            links=[
+                LinkDraft(title="Mail", url="mailto:a@b.com"),
+                LinkDraft(title="Web", url="https://example.com/page"),
+            ],
+        )
+    )
+    dialog = EntryDialog(theme="dark", context=context, entry=entry)
+    assert dialog._guess_site_url() == "https://example.com/page"
+    dialog.close()
+
+    empty = EntryDialog(theme="dark", context=context)
+    assert empty._guess_site_url() == ""
+    empty.close()
+
+
+def test_entry_dialog_download_uses_bytes(context, qapp, monkeypatch) -> None:
+    """A fetched icon reaches the draft without touching the network in tests."""
+    from app.images import icon_fetcher
+    from app.ui.dialogs.entry_dialog import EntryDialog
+    from tests.test_starter_and_icons import PNG_BYTES
+
+    dialog = EntryDialog(theme="dark", context=context)
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QInputDialog.getText",
+        staticmethod(lambda *a, **k: ("https://example.com", True)),
+    )
+
+    def fake_fetch(url: str):
+        return icon_fetcher.FetchedIcon(data=PNG_BYTES, url="https://example.com/favicon.ico")
+
+    monkeypatch.setattr(icon_fetcher, "fetch_icon", fake_fetch)
+    dialog._download_icon()
+
+    assert _wait_until(qapp, lambda: dialog._downloaded_bytes is not None)
+    assert dialog._downloaded_bytes == PNG_BYTES
+    assert not dialog._preview_failed
+    draft = dialog.build_draft()
+    assert draft.image_action == "replace"
+    assert draft.image_bytes == PNG_BYTES
+    dialog.close()
+
+
+def test_entry_dialog_download_failure_is_inline(context, qapp, monkeypatch) -> None:
+    from app.images import icon_fetcher
+    from app.ui.dialogs.entry_dialog import EntryDialog
+
+    dialog = EntryDialog(theme="dark", context=context)
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QInputDialog.getText",
+        staticmethod(lambda *a, **k: ("https://example.com", True)),
+    )
+
+    def fail(url: str):
+        raise icon_fetcher.IconFetchError("Нет подключения к интернету или сайт недоступен")
+
+    monkeypatch.setattr(icon_fetcher, "fetch_icon", fail)
+    dialog._download_icon()
+
+    assert _wait_until(qapp, lambda: bool(dialog.error_label.text()))
+    assert dialog._downloaded_bytes is None
+    assert "Нет подключения" in dialog.error_label.text()
+    assert dialog.download_button.isEnabled()
+    dialog.close()
+

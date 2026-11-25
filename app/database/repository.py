@@ -150,6 +150,13 @@ class Repository:
     def entry_exists(self, entry_id: str) -> bool:
         return bool(self.db.scalar("SELECT 1 FROM entries WHERE id = ?", (entry_id,)))
 
+    def find_entry_by_title(self, title: str) -> Entry | None:
+        """Look up an entry by its normalised title."""
+        row = self.db.query_one(
+            "SELECT id FROM entries WHERE title_key = ? LIMIT 1", (normalize_key(title),)
+        )
+        return self.get_entry(row["id"]) if row else None
+
     def create_entry(
         self,
         *,

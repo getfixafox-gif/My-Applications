@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
@@ -104,6 +105,8 @@ class EntryDialog(QDialog):
         self._tag_ids: list[str] = []
         self._image_action = "keep"
         self._image_source: str | None = None
+        self._downloaded_bytes: bytes | None = None
+        self._preview_failed = False
         self._current_image: str | None = entry.image_path if entry else None
         self.setModal(True)
         self.setMinimumSize(600, 680)
@@ -141,6 +144,9 @@ class EntryDialog(QDialog):
         self.image_button = QPushButton(tr("Выбрать изображение…", "Choose image…"))
         self.image_button.clicked.connect(self._choose_image)
         image_buttons.addWidget(self.image_button)
+        self.download_button = QPushButton(tr("Скачать иконку с сайта", "Download icon from site"))
+        self.download_button.clicked.connect(self._download_icon)
+        image_buttons.addWidget(self.download_button)
         self.image_reset_button = QPushButton(tr("Без изображения", "No image"))
         self.image_reset_button.setObjectName("DangerButton")
         self.image_reset_button.clicked.connect(self._clear_image)
@@ -284,20 +290,99 @@ class EntryDialog(QDialog):
         self._image_source = path
         self._update_preview()
 
+    def _download_icon(self) -> None:
+        """Explicit, user-initiated network fetch of a site icon.
+
+        Nothing here runs automatically: it is the only place in the
+        application that touches the network, and only after a click. The
+        bytes stay in memory until the entry is saved, so cancelling the
+        dialog leaves no orphan files behind.
+        """
+        url = self._guess_site_url()
+        text, ok = QInputDialog.getText(
+            self,
+            tr("Скачать иконку", "Download icon"),
+            tr(
+                "Адрес сайта, с которого взять иконку:",
+                "Site address to take the icon from:",
+            ),
+            text=url,
+        )
+        if not ok:
+            return
+        target = text.strip()
+        if not target:
+            return
+        self.error_label.hide()
+        original_text = tr("Скачать иконку с сайта", "Download icon from site")
+        self.download_button.setEnabled(False)
+        self.download_button.setText(tr("Загрузка…", "Downloading…"))
+
+        def job():
+            from app.images.icon_fetcher import fetch_icon
+
+            return fetch_icon(target)
+
+        def done(fetched) -> None:
+            self.download_button.setEnabled(True)
+            self.download_button.setText(original_text)
+            self._downloaded_bytes = fetched.data
+            self._image_action = "replace"
+            self._image_source = None
+            self._update_preview()
+            if self._preview_failed:
+                self._downloaded_bytes = None
+                self._image_action = "keep"
+                self._update_preview()
+                self._show_error(
+                    tr(
+                        "Скачанный файл не является изображением. Попробуйте другой сайт.",
+                        "The downloaded file is not an image. Try another site.",
+                    )
+                )
+            else:
+                self.error_label.hide()
+
+        def failed(message: str) -> None:
+            self.download_button.setEnabled(True)
+            self.download_button.setText(original_text)
+            self._show_error(message)
+
+        from app.utils.tasks import TaskRunner
+
+        self._download_runner = TaskRunner()
+        self._download_task = self._download_runner.run(
+            job, on_finished=done, on_failed=failed
+        )
+
+    def _guess_site_url(self) -> str:
+        """Pick a plausible website address for the icon request."""
+        candidates = [link.url for link in self._links]
+        if self.entry is not None:
+            candidates.extend(link.url for link in self.entry.links)
+        for value in candidates:
+            value = (value or "").strip()
+            if value.lower().startswith(("http://", "https://")):
+                return value
+        return ""
+
     def _clear_image(self) -> None:
         self._image_action = "remove"
         self._image_source = None
+        self._downloaded_bytes = None
         self._update_preview()
 
     def _update_preview(self) -> None:
         pixmap = None
-        if self._image_action == "replace" and self._image_source:
+        self._preview_failed = False
+        if self._image_action == "replace" and (self._image_source or self._downloaded_bytes):
             data = None
             try:
                 from PIL import Image, ImageOps
                 import io
 
-                with Image.open(self._image_source) as image:
+                upload = io.BytesIO(self._downloaded_bytes) if self._downloaded_bytes else self._image_source
+                with Image.open(upload) as image:
                     image = ImageOps.exif_transpose(image)
                     image.thumbnail((176, 176))
                     buffer = io.BytesIO()
@@ -312,6 +397,7 @@ class EntryDialog(QDialog):
                 if pixmap.isNull():
                     pixmap = None
             if pixmap is None:
+                self._preview_failed = True
                 pixmap = placeholder_icon(88, "!", self.theme)
                 self.error_label.setText(
                     tr("Не удалось прочитать изображение", "Cannot read this image")
@@ -392,7 +478,7 @@ class EntryDialog(QDialog):
             self._show_error(str(exc))
             self.title_edit.setFocus()
             return
-        if self._image_action == "replace" and not self._image_source:
+        if self._image_action == "replace" and not self._image_source and not self._downloaded_bytes:
             self._show_error(tr("Выберите файл изображения", "Choose an image file"))
             return
         self.accept()
@@ -411,5 +497,6 @@ class EntryDialog(QDialog):
             links=list(self._links),
             image_action=self._image_action,
             image_source=self._image_source,
+            image_bytes=self._downloaded_bytes,
         )
         return draft

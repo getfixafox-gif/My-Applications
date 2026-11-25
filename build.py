@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import platform
 import shutil
 import subprocess
@@ -38,6 +39,7 @@ def clean() -> None:
 def build() -> Path:
     ensure_pyinstaller()
     system = platform.system()
+    onefile = os.environ.get("MYAPPLICATIONS_ONEFILE", "1").strip() not in {"0", "false", "no"}
     args = [
         sys.executable,
         "-m",
@@ -50,11 +52,15 @@ def build() -> Path:
         str(BUILD),
         str(SPEC),
     ]
-    print("Building for", system)
+    print("Building for", system, "(one file)" if onefile else "(one folder)")
     subprocess.check_call(args, cwd=ROOT)
     if system == "Windows":
-        return DIST / "MyApplications" / "MyApplications.exe"
-    return DIST / "MyApplications" / "MyApplications"
+        suffix = ".exe"
+    else:
+        suffix = ""
+    if onefile:
+        return DIST / f"MyApplications{suffix}"
+    return DIST / "MyApplications" / f"MyApplications{suffix}"
 
 
 def main() -> int:

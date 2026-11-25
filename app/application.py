@@ -16,6 +16,7 @@ from app.services.backup_service import BackupService
 from app.services.category_service import CategoryService
 from app.services.entry_service import EntryService
 from app.services.search_service import SearchService
+from app.services.starter_service import StarterService
 from app.services.tag_service import TagService
 from app.settings.config_manager import ConfigManager
 from app.storage.backup_manager import BackupManager
@@ -40,6 +41,7 @@ class AppContext:
     search: SearchService
     backups: BackupService
     files: FileManager
+    starter: StarterService
     schema_version: int = 0
 
     def apply_settings(self) -> None:
@@ -97,6 +99,7 @@ def create_context(data_dir: str | Path | None = None) -> AppContext:
     files = FileManager(paths)
     manager = BackupManager(database, repository, paths)
     backups = BackupService(manager, config)
+    starter = StarterService(database, repository, categories, tags)
 
     context = AppContext(
         paths=paths,
@@ -110,6 +113,7 @@ def create_context(data_dir: str | Path | None = None) -> AppContext:
         search=search,
         backups=backups,
         files=files,
+        starter=starter,
         schema_version=schema,
     )
     context.apply_settings()

@@ -9,13 +9,7 @@ dist/
 .pytest_cache/
 _*.png
 _*.log
-_smoke*.py
-_shot*.py
-_debug*.py
-_fonts.py
-_mini_test.py
-_ui_hang.py
-_uitest.log
+/_*.py
 
 # Runtime data directory (only at the repository root, never inside app/).
 /Images/

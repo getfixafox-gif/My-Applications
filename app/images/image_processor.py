@@ -82,6 +82,29 @@ class ImageProcessor:
         except Exception:  # noqa: BLE001 - EXIF issues must not block import
             logger.debug("EXIF orientation could not be applied for %s", src)
 
+        return self._store(image)
+
+    def import_bytes(self, data: bytes) -> str:
+        """Store raw image bytes (a downloaded icon) and return its path."""
+        if not data:
+            raise ImageError("Пустое изображение")
+        if len(data) > MAX_FILE_SIZE:
+            raise ImageError("Изображение слишком большое")
+        try:
+            with Image.open(io.BytesIO(data)) as raw:
+                raw = pick_icon(raw)
+                raw.load()
+                image = raw.copy()
+        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+            raise ImageError("Полученный файл не является изображением") from exc
+        try:
+            image = ImageOps.exif_transpose(image)
+        except Exception:  # noqa: BLE001 - EXIF issues must not block import
+            logger.debug("EXIF orientation could not be applied to downloaded icon")
+        return self._store(image)
+
+    def _store(self, image: Image.Image) -> str:
+        """Normalise, save and thumbnail an in-memory image."""
         has_alpha = image.mode in ("RGBA", "LA") or (
             image.mode == "P" and "transparency" in image.info
         )

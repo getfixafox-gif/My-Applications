@@ -51,6 +51,8 @@ class EntryDraft:
     #: ``keep`` | ``replace`` | ``remove``
     image_action: str = "keep"
     image_source: str | None = None
+    #: Raw downloaded icon bytes (used instead of ``image_source``).
+    image_bytes: bytes | None = None
 
 
 class EntryService:
@@ -133,6 +135,9 @@ class EntryService:
         if action == "remove":
             return None, None
         if action == "replace":
+            if draft.image_bytes:
+                relative = self.images.import_bytes(draft.image_bytes)
+                return relative, relative
             source = draft.image_source
             if not source:
                 return current_relative, None

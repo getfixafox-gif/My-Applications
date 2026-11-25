@@ -64,6 +64,13 @@ def run(argv: list[str] | None = None) -> int:
     app.setFont(font)
     app.setStyleSheet(build_stylesheet(context.config.get("theme", "dark")))
 
+    # The starter catalogue is only added by the real application entry point
+    # (never inside ``create_context``), so importing data stays silent.
+    try:
+        context.starter.seed()
+    except Exception as exc:  # noqa: BLE001 - the app must still start
+        get_logger().warning("Cannot create starter catalog: %s", exc)
+
     from app.ui.styles.icons import app_icon
 
     app.setWindowIcon(app_icon())
