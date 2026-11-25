@@ -16,9 +16,11 @@ _fonts.py
 _mini_test.py
 _ui_hang.py
 _uitest.log
-database.db
-database.db-*
-Images/
-Backups/
-Logs/
-config/
+
+# Runtime data directory (only at the repository root, never inside app/).
+/Images/
+/Backups/
+/Logs/
+/config/
+/database.db
+/database.db-*
